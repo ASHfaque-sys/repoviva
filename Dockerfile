@@ -34,3 +34,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
 
 # Start the combined FastAPI Dashboard + Remote MCP Server
 CMD ["python", "main.py"]
+

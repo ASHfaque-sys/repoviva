@@ -11,3 +11,4 @@ services:
       name: repoviva-data
       mountPath: /app/data
       sizeGB: 1
+
