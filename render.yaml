@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: repoviva-graph
+    runtime: docker
+    plan: free
+    healthCheckPath: /api/status
+    envVars:
+      - key: GITHUB_TOKEN
+        sync: false
+    disk:
+      name: repoviva-data
+      mountPath: /app/data
+      sizeGB: 1

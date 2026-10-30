@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RepoViva Graph</title>
+  <script src="https://unpkg.com/cytoscape@3.30.4/dist/cytoscape.min.js"></script>
+  <style>
+    :root { color-scheme: dark; --bg:#0b1020; --panel:#111a2d; --border:#26344d; --text:#e7edf8; --muted:#a7b4c9; --accent:#7dd3fc; }
+    * { box-sizing:border-box; }
+    body { margin:0; font:14px/1.5 Inter, ui-sans-serif, system-ui, Segoe UI, sans-serif; background:var(--bg); color:var(--text); }
+    header { padding:22px 26px; border-bottom:1px solid var(--border); background:#0e1628; }
+    h1 { margin:0 0 4px; font-size:25px; letter-spacing:-.4px; }
+    h2 { font-size:17px; margin:0 0 12px; }
+    p { margin:6px 0; color:var(--muted); }
+    .wrap { padding:18px; max-width:1500px; margin:auto; }
+    .controls { display:flex; flex-wrap:wrap; gap:10px; align-items:end; background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:14px; margin-bottom:14px; }
+    label { display:flex; flex-direction:column; gap:5px; color:var(--muted); font-size:12px; }
+    input, select, textarea, button { font:inherit; color:var(--text); background:#0b1222; border:1px solid #334563; border-radius:8px; padding:9px 10px; }
+    input[type=range] { padding:0; }
+    button { cursor:pointer; background:#15344d; border-color:#285677; }
+    button:hover { background:#1d4665; }
+    button:disabled { opacity:.5; cursor:wait; }
+    .tabs { display:flex; gap:8px; margin-bottom:12px; }
+    .tabs button.active { background:#164e63; border-color:var(--accent); }
+    .layout { display:grid; grid-template-columns:minmax(0, 1fr) 330px; gap:14px; }
+    .panel { background:var(--panel); border:1px solid var(--border); border-radius:12px; overflow:hidden; }
+    #graph { height:650px; width:100%; background:radial-gradient(#24304a 1px, transparent 1px); background-size:20px 20px; }
+    .side { padding:16px; min-height:300px; }
+    .statgrid { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-bottom:14px; }
+    .stat { background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:12px; }
+    .stat strong { display:block; font-size:22px; }
+    .stat span { color:var(--muted); font-size:12px; }
+    .tag { display:inline-block; border:1px solid #334563; border-radius:20px; padding:3px 8px; margin:3px 3px 0 0; color:#bfdbfe; font-size:11px; }
+    .muted { color:var(--muted); }
+    .small { font-size:12px; }
+    .divider { height:1px; background:var(--border); margin:14px 0; }
+    .good { color:#86efac; } .warn { color:#fcd34d; }
+    .field { margin:12px 0; }
+    .field textarea { width:100%; min-height:90px; resize:vertical; }
+    .field select { width:100%; }
+    a { color:var(--accent); }
+    pre { white-space:pre-wrap; overflow-wrap:anywhere; color:#d2dbea; font-size:12px; }
+    @media (max-width: 900px) { .layout { grid-template-columns:1fr; } #graph { height:500px; } .statgrid { grid-template-columns:repeat(2,1fr); } }
+  </style>
+</head>
+<body>
+<header>
+  <h1>RepoViva Graph</h1>
+  <p>Local-first repository portfolio intelligence and interview-question mapping.</p>
+</header>
+<div class="wrap">
+  <div class="statgrid">
+    <div class="stat"><strong id="statRepos">0</strong><span>Repositories indexed</span></div>
+    <div class="stat"><strong id="statRepoEdges">0</strong><span>Repository relationships</span></div>
+    <div class="stat"><strong id="statQuestions">0</strong><span>Question candidates</span></div>
+    <div class="stat"><strong id="statAttempts">0</strong><span>Answer attempts</span></div>
+  </div>
+  <section class="controls">
+    <label>Public GitHub username (leave blank if token is configured)
+      <input id="username" placeholder="e.g. octocat" autocomplete="off">
+    </label>
+    <label>Max repositories
+      <select id="maxRepos"><option>20</option><option selected>100</option><option>200</option></select>
+    </label>
+    <button id="syncBtn" onclick="syncRepos()">Sync GitHub repositories</button>
+    <button id="recalcBtn" onclick="recalculate()">Recalculate graph</button>
+    <label>Minimum relationship score <span id="thresholdLabel">15%</span>
+      <input id="threshold" type="range" min="0" max="80" value="15" oninput="thresholdChanged()">
+    </label>
+  </section>
+  <div id="status" class="small muted" role="status">Ready. Sync a public GitHub username or configure a token in .env for your own accessible repositories.</div>
+  <div class="tabs">
+    <button id="repoTab" class="active" onclick="switchMode('repos')">Repository graph</button>
+    <button id="questionTab" onclick="switchMode('questions')">Question graph</button>
+  </div>
+  <div class="layout">
+    <section class="panel"><div id="graph" aria-label="Interactive graph"></div></section>
+    <aside class="panel side">
+      <h2 id="detailTitle">Explore the graph</h2>
+      <div id="detailBody"><p>Click a repository node or an edge to inspect its metadata, relationship scores, and supporting evidence.</p><p class="small">For a question node, you can save a practice answer and your self-rating.</p></div>
+      <div id="answerPanel" hidden>
+        <div class="divider"></div><h2>Practice answer</h2>
+        <div class="field"><label>Your answer<textarea id="answerText" maxlength="10000" placeholder="Explain the concept in your own words..."></textarea></label></div>
+        <div class="field"><label>Self-rating (1 = not confident, 5 = can explain and defend it)
+          <select id="selfRating"><option value="1">1 - Not confident</option><option value="2">2 - Weak</option><option value="3" selected>3 - Fair</option><option value="4">4 - Strong</option><option value="5">5 - Confident</option></select>
+        </label></div>
+        <button onclick="saveAnswer()">Save practice attempt</button>
+      </div>
+      <div class="divider"></div>
+      <h2>Suggested next questions</h2>
+      <div id="learningPath" class="small muted">No questions yet. Sync repositories first.</div>
+    </aside>
+  </div>
+  <p class="small muted">Prototype note: scores compare metadata and README/description text, not copied source-code percentages. Question candidates are template-generated from repository metadata until source indexing is added.</p>
+</div>
+<script>
+let cy = null;
+let mode = 'repos';
+let selectedQuestionId = null;
+let lastGraph = null;
+
+function setStatus(message, kind='muted') {
+  const el = document.getElementById('status'); el.textContent = message; el.className = `small ${kind}`;
+}
+function thresholdChanged() {
+  const n = Number(document.getElementById('threshold').value);
+  document.getElementById('thresholdLabel').textContent = `${n}%`;
+  loadGraph();
+}
+function switchMode(next) {
+  mode = next; selectedQuestionId = null;
+  document.getElementById('repoTab').classList.toggle('active', mode === 'repos');
+  document.getElementById('questionTab').classList.toggle('active', mode === 'questions');
+  document.getElementById('answerPanel').hidden = true;
+  loadGraph();
+}
+async function api(path, options) {
+  const response = await fetch(path, options);
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body.detail || `HTTP ${response.status}`);
+  return body;
+}
+async function syncRepos() {
+  const btn = document.getElementById('syncBtn'); btn.disabled = true;
+  setStatus('Syncing repository metadata and README files. Larger accounts may take time...', 'warn');
+  try {
+    const username = document.getElementById('username').value.trim() || null;
+    const result = await api('/api/sync', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({username, max_repositories:Number(document.getElementById('maxRepos').value)})});
+    setStatus(`Sync complete: ${result.synced_repositories} repositories; ${result.repository_relationships} repository pairs; ${result.generated_question_candidates} question candidates.`, 'good');
+    await refreshStats(); await loadGraph(); await loadLearningPath();
+  } catch (e) { setStatus(`Sync failed: ${e.message}`, 'warn'); }
+  finally { btn.disabled = false; }
+}
+async function recalculate() {
+  const btn = document.getElementById('recalcBtn'); btn.disabled = true;
+  setStatus('Recalculating local scores and question relationships...');
+  try { const r = await api('/api/recalculate', {method:'POST'}); setStatus(`Recalculated ${r.repositories} repositories and ${r.repository_relationships} repository relationships.`, 'good'); await refreshStats(); await loadGraph(); await loadLearningPath(); }
+  catch(e) { setStatus(`Recalculation failed: ${e.message}`, 'warn'); }
+  finally { btn.disabled = false; }
+}
+async function refreshStats() {
+  const s = await api('/api/status');
+  document.getElementById('statRepos').textContent = s.repositories;
+  document.getElementById('statRepoEdges').textContent = s.repository_relationships;
+  document.getElementById('statQuestions').textContent = s.questions;
+  document.getElementById('statAttempts').textContent = s.answer_attempts;
+  if (s.github_token_configured) setStatus('GitHub token is configured locally. The account sync will use that token; it is not sent to the browser.', 'good');
+}
+async function loadGraph() {
+  if (typeof cytoscape === 'undefined') { setStatus('Cytoscape.js did not load. Check Internet access or vendor it locally.', 'warn'); return; }
+  try {
+    const min = Number(document.getElementById('threshold').value) / 100;
+    const data = mode === 'repos' ? await api(`/api/graph?min_similarity=${min}&max_nodes=100`) : await api('/api/question-graph?min_score=0.5&limit=300');
+    lastGraph = data;
+    if (cy) cy.destroy();
+    cy = cytoscape({
+      container: document.getElementById('graph'), elements:[...(data.nodes||[]), ...(data.edges||[])],
+      layout: {name:'cose', animate:false, fit:true, padding:32, nodeRepulsion:9000, idealEdgeLength:120},
+      style:[
+        {selector:'node', style:{'background-color': mode==='repos'?'#38bdf8':'#a78bfa','label':'data(label)','color':'#e8effa','font-size':9,'text-wrap':'wrap','text-max-width':110,'text-valign':'bottom','text-margin-y':7,'width':mode==='repos'?26:18,'height':mode==='repos'?26:18,'border-width':1,'border-color':'#dbeafe'}},
+        {selector:'edge', style:{'width':'mapData(score, 0, 1, 1, 6)','line-color':'#526783','target-arrow-color':'#526783','target-arrow-shape':'triangle','curve-style':'bezier','opacity':0.72,'label':'data(label)','font-size':8,'color':'#b9c6d9','text-rotation':'autorotate','text-background-color':'#0b1020','text-background-opacity':0.8}},
+        {selector:'node:selected', style:{'border-width':4,'border-color':'#fde68a','background-color':'#f59e0b'}},
+        {selector:'edge:selected', style:{'line-color':'#fde68a','target-arrow-color':'#fde68a','width':7,'opacity':1}}
+      ]
+    });
+    cy.on('tap','node', evt => showNode(evt.target.data()));
+    cy.on('tap','edge', evt => showEdge(evt.target.data()));
+    if (!data.nodes || data.nodes.length===0) showEmpty();
+  } catch(e) { setStatus(`Could not load graph: ${e.message}`, 'warn'); }
+}
+function showEmpty() {
+  document.getElementById('detailTitle').textContent = 'No graph nodes';
+  document.getElementById('detailBody').innerHTML = '<p>No indexed items match this view. Sync repositories or lower the score threshold.</p>';
+  document.getElementById('answerPanel').hidden = true;
+}
+function tags(items) { return (items||[]).map(x=>`<span class="tag">${escapeHtml(String(x))}</span>`).join('') || '<span class="muted">None recorded</span>'; }
+function escapeHtml(value) { return value.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function showNode(d) {
+  document.getElementById('detailTitle').textContent = mode==='repos' ? d.full_name : `Question ${d.question_id}`;
+  selectedQuestionId = mode==='questions' ? d.question_id : null;
+  const answerPanel = document.getElementById('answerPanel'); answerPanel.hidden = !selectedQuestionId;
+  if (mode==='repos') {
+    document.getElementById('detailBody').innerHTML = `
+      <p>${escapeHtml(d.description || 'No description provided.')}</p>
+      <p><a href="${escapeHtml(d.url)}" target="_blank" rel="noopener noreferrer">Open GitHub repository</a></p>
+      <p class="small">Stars: ${d.stars} · Forks: ${d.forks} · Updated: ${escapeHtml(d.updated || 'unknown')}</p>
+      <div class="field"><b>Languages</b><br>${tags(d.languages)}</div>
+      <div class="field"><b>Topics</b><br>${tags(d.topics)}</div>
+      <div class="field"><b>Visibility</b><br>${d.private?'Private':'Public'}</div>`;
+  } else {
+    document.getElementById('detailBody').innerHTML = `
+      <p>${escapeHtml(d.question_text)}</p><div class="field"><b>Repository</b><br>${escapeHtml(d.repo_full_name)}</div>
+      <div class="field"><b>Concept</b><br>${escapeHtml(d.concept)}</div>
+      <div class="field"><b>Difficulty</b><br>${escapeHtml(d.difficulty)}</div>
+      <div class="field"><b>Evidence type</b><br>${escapeHtml(d.evidence_type)}</div>
+      <div class="field"><b>Evidence reference</b><br>${escapeHtml(d.evidence_ref)}</div>
+      <div class="field"><b>Evidence excerpt</b><pre>${escapeHtml(d.evidence_excerpt || 'No excerpt available.')}</pre></div>
+      <p class="small warn">Starter questions use repository metadata/README. Add source-code indexing before treating these as verified implementation questions.</p>`;
+  }
+}
+function showEdge(d) {
+  document.getElementById('detailTitle').textContent = 'Relationship details';
+  document.getElementById('answerPanel').hidden = true; selectedQuestionId = null;
+  if (mode==='repos') {
+    const e = d.evidence || {};
+    document.getElementById('detailBody').innerHTML = `
+      <p><b>${escapeHtml(d.source)}</b><br>and<br><b>${escapeHtml(d.target)}</b></p>
+      <div class="field"><b>Overall heuristic similarity</b><br><strong>${Math.round(d.score*100)}%</strong></div>
+      <div class="field"><b>Technology / language overlap</b><br>${fmtScore(d.technology_score)}</div>
+      <div class="field"><b>Topic overlap</b><br>${fmtScore(d.topic_score)}</div>
+      <div class="field"><b>Description + README text</b><br>${fmtScore(d.content_score)}</div>
+      <div class="field"><b>Shared languages</b><br>${tags(e.shared_languages)}</div>
+      <div class="field"><b>Shared topics</b><br>${tags(e.shared_topics)}</div>
+      <p class="small warn">This is a heuristic similarity estimate. It is not a probability or percentage of identical code.</p>`;
+  } else {
+    document.getElementById('detailBody').innerHTML = `<p><b>${escapeHtml(d.relation_type)}</b>: ${Math.round(d.score*100)}%</p><p>${escapeHtml(d.explanation || '')}</p><p class="small">In this starter, question edges are created when question concept tags match exactly.</p>`;
+  }
+}
+function fmtScore(n) { return n===null || n===undefined ? 'Not enough evidence' : `${Math.round(n*100)}%`; }
+async function saveAnswer() {
+  if (!selectedQuestionId) return;
+  const answer = document.getElementById('answerText').value.trim();
+  if (!answer) { setStatus('Enter an answer before saving.', 'warn'); return; }
+  try {
+    await api('/api/answers', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question_id:selectedQuestionId, answer_text:answer, self_rating:Number(document.getElementById('selfRating').value), notes:''})});
+    document.getElementById('answerText').value=''; setStatus('Practice attempt saved.', 'good'); await refreshStats(); await loadLearningPath();
+  } catch(e) { setStatus(`Could not save answer: ${e.message}`, 'warn'); }
+}
+async function loadLearningPath() {
+  try {
+    const items = await api('/api/learning-path?limit=6');
+    document.getElementById('learningPath').innerHTML = items.length ? items.map(q=>`<div class="field"><b>${escapeHtml(q.repo_full_name)}</b><p>${escapeHtml(q.question_text)}</p><span class="muted">${q.attempts===0?'Not attempted':`Average self-rating: ${Number(q.average_rating).toFixed(1)}/5`}</span></div>`).join('') : 'No question candidates yet.';
+  } catch(e) { document.getElementById('learningPath').textContent = 'Could not load suggested questions.'; }
+}
+function showNodeClickDefault() {}
+(async function init() { try { await refreshStats(); await loadGraph(); await loadLearningPath(); } catch(e) { setStatus(`API unavailable: ${e.message}. Start the app with python main.py`, 'warn'); } })();
+</script>
+</body>
+</html>

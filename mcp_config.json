@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "repoviva-graph": {
+      "command": "python",
+      "args": ["run_mcp.py"],
+      "cwd": "c:\\Users\\ashfaque ali\\Downloads\\RepoViva_Graph_Starter\\repoviva_graph_starter"
+    }
+  }
+}
+
